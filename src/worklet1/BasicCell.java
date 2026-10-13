@@ -3,26 +3,43 @@ package worklet1;
 
 import api.Cell;
 import api.EvaluationContext;
-import java.util.Collections;
+
 import java.util.Set;
 
-public class BasicCell implements Cell {
+/**
+ * Base class for spreadsheet cells.
+ * Stores the original content and the current evaluated state.
+ */
+public abstract class BasicCell implements Cell {
 
-    private String reference;
-    private Object value;
-    private String content;
+    private final String reference;
+    private final String content;
+    private final Object value;
+    private final String displayValue;
+    private final String error;
 
-    public BasicCell(String reference, Object value, String content) {
+    protected BasicCell(
+            String reference,
+            String content,
+            Object value,
+            String displayValue,
+            String error) {
+
         this.reference = reference;
-        this.value = value;
         this.content = content;
+        this.value = value;
+        this.displayValue = displayValue;
+        this.error = error;
     }
 
     @Override
-    public String getReference() {
+    public final String getReference() {
         return reference;
     }
 
+    /**
+     * Returns the evaluated value, not the original input.
+     */
     @Override
     public Object getValue() {
         return value;
@@ -30,36 +47,35 @@ public class BasicCell implements Cell {
 
     @Override
     public String getDisplayValue() {
-        if (value == null) {
-            return "";
-        }
-        return value.toString();
+        return displayValue;
     }
 
     @Override
     public String getError() {
-        return null;
+        return error;
     }
 
+    /**
+     * Literal and empty cells have no formula dependencies.
+     */
     @Override
     public Set<String> getDependencies() {
-        return Collections.emptySet();
+        return Set.of();
     }
 
+    /**
+     * Literal and empty cells are already evaluated.
+     */
     @Override
     public Object evaluate(EvaluationContext context) {
         return value;
     }
 
-    public String getContent() {
+    /**
+     * Returns the exact content entered by the user.
+     * This is an additional method, not part of the shared Cell API.
+     */
+    public final String getContent() {
         return content;
-    }
-
-    public void setValue(Object value) {
-        this.value = value;
-    }
-
-    public void setContent(String content) {
-        this.content = content;
     }
 }
