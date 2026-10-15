@@ -1,5 +1,5 @@
 
-package worklet1;
+package worklet1.model;
 
 /**
  * Represents a numeric or text literal cell.
