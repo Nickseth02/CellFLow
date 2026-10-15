@@ -1,5 +1,5 @@
 
-package worklet1;
+package worklet1.model;
 
 /**
  * Represents an explicitly stored empty cell.

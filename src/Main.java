@@ -1,7 +1,8 @@
+package worklet1;
 
-import worklet1.LiteralCell;
-import worklet1.EmptyCell;
-import worklet1.BasicCell;
+import worklet1.model.LiteralCell;
+import worklet1.model.EmptyCell;
+import worklet1.model.BasicCell;
 
 public class Main {
     public static void main(String[] args) {
