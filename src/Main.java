@@ -1,27 +1,14 @@
+
 package worklet1;
 
-import worklet1.model.LiteralCell;
-import worklet1.model.EmptyCell;
-import worklet1.model.BasicCell;
+import worklet1.model.SpreadsheetModel;
+import worklet3.ui.SpreadsheetUI;
 
 public class Main {
+
     public static void main(String[] args) {
+        SpreadsheetModel spreadsheet = new SpreadsheetModel();
 
-        // Create a numeric literal cell
-        BasicCell cell = LiteralCell.fromInput("A1", "10");
-
-        System.out.println("Cell: " + cell.getReference());
-        System.out.println("Original Content: " + cell.getContent());
-        System.out.println("Value: " + cell.getValue());
-        System.out.println("Display: " + cell.getDisplayValue());
-
-        System.out.println();
-
-        // Create an empty cell
-        BasicCell emptyCell = new EmptyCell("B1");
-
-        System.out.println("Cell: " + emptyCell.getReference());
-        System.out.println("Value: " + emptyCell.getValue());
-        System.out.println("Display: '" + emptyCell.getDisplayValue() + "'");
+        SpreadsheetUI.launch(spreadsheet);
     }
 }
