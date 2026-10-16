@@ -1,11 +1,12 @@
-package worklet1.formula;
 
-import java.util.Set;
+package worklet1.formula;
 
 import api.Cell;
 import api.EvaluationContext;
-import worklet1.parser.FormulaParser;
+import java.util.Set;
+import worklet1.ExpressionEvaluator;
 import worklet1.parser.FormulaParseException;
+import worklet1.parser.FormulaParser;
 
 public class FormulaCell implements Cell {
 
@@ -36,10 +37,8 @@ public class FormulaCell implements Cell {
 
         try {
             this.expression = parser.parse(formula);
-
             this.dependencies =
                     dependencyExtractor.extract(expression);
-
         } catch (FormulaParseException e) {
             this.expression = null;
             this.dependencies = Set.of();
@@ -88,13 +87,8 @@ public class FormulaCell implements Cell {
         }
 
         try {
-            // Member 3 must provide this evaluator.
-            ExpressionEvaluator evaluator =
-                    new ExpressionEvaluator();
-
-            value = evaluator.evaluate(expression, context);
+            value = ExpressionEvaluator.evaluate(formula, context);
             error = null;
-
             return value;
 
         } catch (ArithmeticException e) {
