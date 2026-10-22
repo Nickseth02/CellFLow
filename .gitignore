@@ -1,0 +1,11 @@
+@"
+# Java compiled files
+out/
+
+# IDE files
+.idea/
+.vscode/
+
+# Java build files
+*.class
+"@ | Set-Content .gitignore
