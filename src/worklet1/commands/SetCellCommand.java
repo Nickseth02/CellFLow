@@ -47,8 +47,12 @@ public class SetCellCommand implements Command {
         }
 
         if (cell instanceof FormulaCell) {
-            return ((FormulaCell) cell).getFormula();
-        }
+    String formula = ((FormulaCell) cell).getFormula();
+
+    return formula.startsWith("=")
+            ? formula
+            : "=" + formula;
+}
 
         if (cell instanceof BasicCell) {
             return ((BasicCell) cell).getContent();
