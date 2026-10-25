@@ -1,4 +1,4 @@
-package Worklet2;
+package worklet2.graph;
 
 import java.util.*;
 
