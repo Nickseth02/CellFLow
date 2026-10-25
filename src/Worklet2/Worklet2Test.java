@@ -10,16 +10,17 @@ import java.util.*;
 import worklet1.ExpressionEvaluator;
 
 /**
- * Anshul — Testing and Error Handling
- * Standalone test runner for Worklet 2 and integration testing.
+ * Worklet 2 standalone test runner.
  *
  * Covers:
- * 1. Adding and removing dependency edges.
+ * 1. Dependency edge operations and defensive copies.
  * 2. Topological ordering.
  * 3. Circular-dependency prevention and detection.
- * 4. Recalculation of dependent cells upon changes.
- * 5. Division-by-zero errors in formula evaluation.
- * 6. Preservation of existing formulas when circular updates are rejected.
+ * 4. Recalculation of dependent cells.
+ * 5. Formula-to-literal replacement.
+ * 6. Formula error handling and recovery.
+ * 7. Preservation of existing formulas after rejected updates.
+ * 8. Division-by-zero handling in the expression evaluator.
  */
 public class Worklet2Test {
 
@@ -27,11 +28,14 @@ public class Worklet2Test {
     private static int failed = 0;
 
     public static void main(String[] args) {
+        passed = 0;
+        failed = 0;
+
         System.out.println("==================================================");
         System.out.println(" WORKLET 2 DEMONSTRATION & TEST SUITE");
         System.out.println("==================================================");
 
-        // 1. Dependency Graph: Add, Remove, Defensive Copies
+        // 1. Dependency graph operations
         test("Add dependency edges (A1 -> B1 -> C1)",
                 Worklet2Test::testAddDependency);
         test("Remove dependency edges (A1 -> B1)",
@@ -39,13 +43,13 @@ public class Worklet2Test {
         test("Returned dependent set is a defensive copy",
                 Worklet2Test::testDefensiveCopy);
 
-        // 2. Topological Ordering
+        // 2. Topological ordering
         test("Topological sort returns valid calculation order",
                 Worklet2Test::testTopologicalSortOrder);
         test("Subset topological sort on affected cells",
                 Worklet2Test::testSubsetTopologicalSort);
 
-        // 3. Circular Dependency Detection
+        // 3. Circular dependency detection
         test("Self-dependency rejection (A1 -> A1)",
                 Worklet2Test::testSelfDependency);
         test("Multi-cell circular dependency prevention",
@@ -55,15 +59,17 @@ public class Worklet2Test {
         test("Cycle prevention check (wouldCreateCycle)",
                 Worklet2Test::testWouldCreateCycle);
 
-        // 4. Recalculation of Dependent Cells
+        // 4. Recalculation and formula updates
         test("RecalculationEngine updates dependent cells",
                 Worklet2Test::testRecalculationEngineFlow);
-
-        // 5. Formula update regression test
+        test("Replacing a formula with a literal updates dependents",
+                Worklet2Test::testFormulaToLiteralReplacement);
+        test("Formula error handling and recovery",
+                Worklet2Test::testFormulaErrorRecovery);
         test("Rejected circular formula update preserves old formula",
                 Worklet2Test::testRejectedFormulaUpdatePreservesState);
 
-        // 6. Division-by-Zero Errors
+        // 5. Division-by-zero handling
         test("Division-by-zero throws ArithmeticException",
                 Worklet2Test::testDivisionByZero);
 
@@ -79,7 +85,7 @@ public class Worklet2Test {
         }
     }
 
-    // --- 1. Edge Operations ---
+    // --- 1. Dependency graph operations ---
 
     private static void testAddDependency() {
         DependencyGraph graph = new DependencyGraph();
@@ -145,7 +151,7 @@ public class Worklet2Test {
         );
     }
 
-    // --- 2. Topological Ordering ---
+    // --- 2. Topological ordering ---
 
     private static void testTopologicalSortOrder() {
         Map<String, Set<String>> graph = new HashMap<>();
@@ -194,7 +200,7 @@ public class Worklet2Test {
         );
     }
 
-    // --- 3. Circular Dependency Detection ---
+    // --- 3. Circular dependency detection ---
 
     private static void testSelfDependency() {
         DependencyGraph graph = new DependencyGraph();
@@ -213,18 +219,16 @@ public class Worklet2Test {
 
         assertTrue(
                 !graph.hasCycle(),
-                "Rejected self-dependency must not leave a cycle in the graph"
+                "Rejected self-dependency must not leave a cycle"
         );
     }
 
     private static void testMultiCellCycleDetection() {
         DependencyGraph graph = new DependencyGraph();
 
-        // Add the first two edges of A1 -> B1 -> C1.
         graph.addDependency("A1", "B1");
         graph.addDependency("B1", "C1");
 
-        // The third edge would create A1 -> B1 -> C1 -> A1.
         boolean threw = false;
 
         try {
@@ -251,11 +255,9 @@ public class Worklet2Test {
     }
 
     private static void testCircularDependencyExceptionThrown() {
-        // Deliberately construct a cyclic map directly.
-        // This tests GraphAlgorithms independently of DependencyGraph's
-        // cycle-prevention checks.
         Map<String, Set<String>> cyclicGraph = new HashMap<>();
 
+        // Construct a cycle directly to test GraphAlgorithms.
         addEdge(cyclicGraph, "A1", "B1");
         addEdge(cyclicGraph, "B1", "A1");
 
@@ -296,20 +298,25 @@ public class Worklet2Test {
         );
     }
 
-    // --- 4. Recalculation Engine ---
+    // --- 4. Recalculation engine tests ---
 
-    private static void testRecalculationEngineFlow() {
-        Spreadsheet sheet = new Spreadsheet() {
+    private static Spreadsheet createTestSpreadsheet() {
+        return new Spreadsheet() {
             private final Map<String, String> cells = new HashMap<>();
 
             @Override
             public void setCell(String reference, String content) {
-                cells.put(reference.toUpperCase(Locale.ROOT), content);
+                cells.put(
+                        reference.toUpperCase(Locale.ROOT),
+                        content
+                );
             }
 
             @Override
             public Object getValue(String reference) {
-                String value = cells.get(reference.toUpperCase(Locale.ROOT));
+                String value = cells.get(
+                        reference.toUpperCase(Locale.ROOT)
+                );
 
                 if (value == null) {
                     return null;
@@ -338,14 +345,17 @@ public class Worklet2Test {
                 return null;
             }
         };
+    }
 
-        RecalculationEngineImpl engine = new RecalculationEngineImpl(sheet);
+    private static void testRecalculationEngineFlow() {
+        Spreadsheet sheet = createTestSpreadsheet();
+        RecalculationEngineImpl engine =
+                new RecalculationEngineImpl(sheet);
 
         engine.setCell("A1", "10");
         engine.setCell("B1", "=A1+5");
         engine.setCell("C1", "=B1*2");
 
-        // Verify initial values.
         assertEquals(
                 10.0, toDouble(engine.getValue("A1")), 0.001,
                 "Initial A1"
@@ -361,7 +371,6 @@ public class Worklet2Test {
                 "Initial C1"
         );
 
-        // Change A1; B1 and C1 should recalculate.
         engine.setCell("A1", "20");
 
         assertEquals(
@@ -380,57 +389,130 @@ public class Worklet2Test {
         );
     }
 
-    // --- 5. Circular Formula Update Regression Test ---
-
-    private static void testRejectedFormulaUpdatePreservesState() {
-        Spreadsheet sheet = new Spreadsheet() {
-            private final Map<String, String> cells = new HashMap<>();
-
-            @Override
-            public void setCell(String reference, String content) {
-                cells.put(reference.toUpperCase(Locale.ROOT), content);
-            }
-
-            @Override
-            public Object getValue(String reference) {
-                String value = cells.get(reference.toUpperCase(Locale.ROOT));
-
-                if (value == null) {
-                    return null;
-                }
-
-                try {
-                    return Double.parseDouble(value);
-                } catch (NumberFormatException e) {
-                    return value;
-                }
-            }
-
-            @Override
-            public String getDisplayValue(String reference) {
-                Object value = getValue(reference);
-                return value == null ? "" : value.toString();
-            }
-
-            @Override
-            public String getError(String reference) {
-                return null;
-            }
-
-            @Override
-            public Cell getCell(String reference) {
-                return null;
-            }
-        };
-
-        RecalculationEngineImpl engine = new RecalculationEngineImpl(sheet);
+    /**
+     * Replacing B1's formula with a literal should remove A1 -> B1
+     * while retaining B1 -> C1 and recalculating C1.
+     */
+    private static void testFormulaToLiteralReplacement() {
+        Spreadsheet sheet = createTestSpreadsheet();
+        RecalculationEngineImpl engine =
+                new RecalculationEngineImpl(sheet);
 
         engine.setCell("A1", "10");
         engine.setCell("B1", "=A1+5");
         engine.setCell("C1", "=B1*2");
 
-        // Attempt to replace B1 with a formula that depends on C1.
-        // Since C1 already depends on B1, this would create a cycle.
+        assertEquals(
+                15.0, toDouble(engine.getValue("B1")), 0.001,
+                "B1 should initially evaluate to 15"
+        );
+
+        assertEquals(
+                30.0, toDouble(engine.getValue("C1")), 0.001,
+                "C1 should initially evaluate to 30"
+        );
+
+        engine.setCell("B1", "7");
+
+        assertEquals(
+                7.0, toDouble(engine.getValue("B1")), 0.001,
+                "B1 should contain the new literal value"
+        );
+
+        assertEquals(
+                14.0, toDouble(engine.getValue("C1")), 0.001,
+                "C1 should recalculate using the new B1 value"
+        );
+
+        assertSetEquals(
+                Collections.emptySet(),
+                engine.getDependencyGraph().getDependencies("B1"),
+                "B1 should no longer depend on A1"
+        );
+
+        assertSetEquals(
+                Collections.emptySet(),
+                engine.getDependencyGraph().getDependents("A1"),
+                "A1 should no longer have B1 as a dependent"
+        );
+
+        assertSetEquals(
+                setOf("C1"),
+                engine.getDependencyGraph().getDependents("B1"),
+                "C1 should remain dependent on B1"
+        );
+
+        assertTrue(
+                !engine.getDependencyGraph().hasCycle(),
+                "The graph should remain acyclic"
+        );
+    }
+
+    /**
+     * Checks that formula errors are reported and that replacing an
+     * invalid formula clears the error and restores normal calculation.
+     */
+    private static void testFormulaErrorRecovery() {
+        Spreadsheet sheet = createTestSpreadsheet();
+        RecalculationEngineImpl engine =
+                new RecalculationEngineImpl(sheet);
+
+        engine.setCell("A1", "10");
+        engine.setCell("B1", "=A1/0");
+
+        assertEquals(
+                "#DIV/0!",
+                engine.getDisplayValue("B1"),
+                "Division-by-zero display error"
+        );
+
+        assertEquals(
+                "#DIV/0!",
+                engine.getError("B1"),
+                "Division-by-zero error property"
+        );
+
+        // Changing the numerator alone must not clear the error.
+        engine.setCell("A1", "20");
+
+        assertEquals(
+                "#DIV/0!",
+                engine.getDisplayValue("B1"),
+                "Error remains while divisor is zero"
+        );
+
+        // Replacing the invalid formula should recover normally.
+        engine.setCell("B1", "=A1/2");
+
+        assertEquals(
+                10.0, toDouble(engine.getValue("B1")), 0.001,
+                "Formula value after recovery"
+        );
+
+        assertEquals(
+                "10.0",
+                engine.getDisplayValue("B1"),
+                "Formula display value after recovery"
+        );
+
+        assertEquals(
+                null,
+                engine.getError("B1"),
+                "Error cleared after recovery"
+        );
+    }
+
+    // --- 5. Circular formula update regression test ---
+
+    private static void testRejectedFormulaUpdatePreservesState() {
+        Spreadsheet sheet = createTestSpreadsheet();
+        RecalculationEngineImpl engine =
+                new RecalculationEngineImpl(sheet);
+
+        engine.setCell("A1", "10");
+        engine.setCell("B1", "=A1+5");
+        engine.setCell("C1", "=B1*2");
+
         boolean rejected = false;
 
         try {
@@ -444,26 +526,22 @@ public class Worklet2Test {
                 "Circular formula update must be rejected"
         );
 
-        // The old formula for B1 must still evaluate to 15.
         assertEquals(
                 15.0, toDouble(engine.getValue("B1")), 0.001,
                 "B1's original formula must be preserved"
         );
 
-        // C1 must retain its original value of 30.
         assertEquals(
                 30.0, toDouble(engine.getValue("C1")), 0.001,
                 "C1's value must remain correct"
         );
 
-        // The original dependency A1 -> B1 must remain.
         assertSetEquals(
                 setOf("A1"),
                 engine.getDependencyGraph().getDependencies("B1"),
                 "B1 must retain its original dependency on A1"
         );
 
-        // The original dependency B1 -> C1 must remain.
         assertSetEquals(
                 setOf("C1"),
                 engine.getDependencyGraph().getDependents("B1"),
@@ -476,7 +554,7 @@ public class Worklet2Test {
         );
     }
 
-    // --- 6. Division by Zero ---
+    // --- 6. Division by zero in ExpressionEvaluator ---
 
     private static void testDivisionByZero() {
         EvaluationContext context = ref -> 0.0;
@@ -494,7 +572,7 @@ public class Worklet2Test {
         );
     }
 
-    // --- Test Harness Utilities ---
+    // --- Test harness utilities ---
 
     private static void test(String name, Runnable testCase) {
         try {
@@ -542,7 +620,8 @@ public class Worklet2Test {
     ) {
         if (!expected.equals(actual)) {
             throw new AssertionError(
-                    message + " [expected=" + expected + ", actual=" + actual + "]"
+                    message + " [expected=" + expected
+                            + ", actual=" + actual + "]"
             );
         }
     }
@@ -555,7 +634,21 @@ public class Worklet2Test {
     ) {
         if (Math.abs(expected - actual) > delta) {
             throw new AssertionError(
-                    message + " [expected=" + expected + ", actual=" + actual + "]"
+                    message + " [expected=" + expected
+                            + ", actual=" + actual + "]"
+            );
+        }
+    }
+
+    private static void assertEquals(
+            Object expected,
+            Object actual,
+            String message
+    ) {
+        if (!Objects.equals(expected, actual)) {
+            throw new AssertionError(
+                    message + " [expected=" + expected
+                            + ", actual=" + actual + "]"
             );
         }
     }
