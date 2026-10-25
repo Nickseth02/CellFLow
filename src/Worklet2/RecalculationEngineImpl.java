@@ -1,3 +1,4 @@
+
 package Worklet2;
 
 import api.EvaluationContext;
@@ -5,337 +6,190 @@ import api.RecalculationEngine;
 import api.Spreadsheet;
 
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.Collections;
 
 import worklet1.formula.FormulaCell;
 
-public class RecalculationEngineImpl
-        implements RecalculationEngine {
+public class RecalculationEngineImpl implements RecalculationEngine {
 
-    // Spreadsheet containing literal and empty cells
     private final Spreadsheet sheet;
-
-    // Dependency graph used for Worklet 2
     private final DependencyGraph dependencyGraph;
-
-    // Stores all formula cells
-    private final Map<String, FormulaCell> formulaCells =
-            new HashMap<>();
-
-    // Context used by FormulaCell when evaluating formulas
+    private final Map<String, FormulaCell> formulaCells = new HashMap<>();
     private final EvaluationContext context;
 
-    /*
-     * Constructor
-     */
     public RecalculationEngineImpl(Spreadsheet sheet) {
+        this.sheet = Objects.requireNonNull(sheet, "Spreadsheet must not be null");
+        this.dependencyGraph = new DependencyGraph();
 
-        this.sheet = sheet;
-
-        this.dependencyGraph =
-                new DependencyGraph();
-
-        /*
-         * IMPORTANT:
-         * Context is initialized here, after sheet has
-         * already been initialized.
-         *
-         * This fixes the Java error:
-         * "variable sheet might not have been initialized"
-         */
         this.context = reference -> {
+            String ref = normalizeReference(reference);
 
-            String ref =
-                    reference.toUpperCase();
-
-            /*
-             * If the referenced cell is a formula,
-             * return its calculated value.
-             */
-            FormulaCell formula =
-                    formulaCells.get(ref);
+            FormulaCell formula = formulaCells.get(ref);
 
             if (formula != null) {
                 return formula.getValue();
             }
 
-            /*
-             * Otherwise get the value from the
-             * normal spreadsheet model.
-             */
             return this.sheet.getValue(ref);
         };
     }
 
-    /*
-     * Set or update a cell.
+    /**
+     * Sets or updates a cell.
      *
-     * Examples:
-     *
-     * setCell("A1", "10");
-     * setCell("B1", "=A1+5");
+     * Formula changes are validated against a temporary graph first.
+     * If the new dependencies would create a cycle, the old formula
+     * and its dependency relationships remain unchanged.
      */
-    public void setCell(
-            String reference,
-            String content) {
+    public void setCell(String reference, String content) {
+        String ref = normalizeReference(reference);
+        Objects.requireNonNull(content, "Cell content must not be null");
 
-        String ref =
-                reference.toUpperCase();
-
-        /*
-         * If this cell previously contained a formula,
-         * remove its old dependency relationships.
-         */
-        removeOldDependencies(ref);
-
-        /*
-         * Formula cell
-         */
         if (content.startsWith("=")) {
-
-            FormulaCell formula =
-                    new FormulaCell(ref, content);
-
-            formulaCells.put(ref, formula);
-
-            dependencyGraph.addCell(ref);
-
-            /*
-             * Add dependency edges.
-             *
-             * Example:
-             *
-             * B1 = =A1+5
-             *
-             * creates:
-             *
-             * A1 -> B1
-             */
-            for (String dependency :
-                    formula.getDependencies()) {
-
-                dependencyGraph.addDependency(
-                        dependency,
-                        ref
-                );
-            }
-
+            setFormulaCell(ref, content);
         } else {
-
-            /*
-             * Normal/literal cell.
-             */
-            formulaCells.remove(ref);
-
-            sheet.setCell(ref, content);
-
-            dependencyGraph.addCell(ref);
+            setLiteralCell(ref, content);
         }
 
-        /*
-         * Recalculate cells affected by this change.
-         */
         recalculate(ref);
     }
 
-    /*
-     * Remove dependency edges belonging to
-     * the previous formula in this cell.
-     *
-     * Example:
-     *
-     * B1 = =A1+5
-     *
-     * A1 -> B1
-     *
-     * If B1 changes to:
-     *
-     * B1 = =D1+5
-     *
-     * we remove:
-     *
-     * A1 -> B1
-     *
-     * and later add:
-     *
-     * D1 -> B1
-     */
-    private void removeOldDependencies(
-            String ref) {
+    private void setFormulaCell(String ref, String content) {
+        // Build the candidate without changing the current formula.
+        FormulaCell candidate = new FormulaCell(ref, content);
 
-        FormulaCell old =
-                formulaCells.get(ref);
+        // Atomically validate and replace this cell's incoming edges.
+        // If validation fails, formulaCells and the original graph
+        // remain unchanged.
+        dependencyGraph.replaceDependencies(
+                ref,
+                candidate.getDependencies()
+        );
 
-        if (old == null) {
-            return;
-        }
-
-        for (String dependency :
-                old.getDependencies()) {
-
-            dependencyGraph.removeDependency(
-                    dependency,
-                    ref
-            );
-        }
+        // Commit the formula only after the graph accepts it.
+        formulaCells.put(ref, candidate);
     }
 
-    /*
-     * Recalculate all cells affected by a change.
-     *
-     * Example:
-     *
-     * A1 -> B1 -> C1 -> D1
-     *
-     * If A1 changes:
-     *
-     * B1, C1 and D1
-     * are recalculated.
+    private void setLiteralCell(String ref, String content) {
+        /*
+         * Let the spreadsheet validate/store the literal first.
+         * If this throws, the graph and formula map are unchanged.
+         */
+        sheet.setCell(ref, content);
+
+        // A literal cell no longer has formula dependencies.
+        dependencyGraph.replaceDependencies(
+                ref,
+                Collections.emptySet()
+        );
+
+        formulaCells.remove(ref);
+        dependencyGraph.addCell(ref);
+    }
+
+    /**
+     * Recalculates all formula cells affected by the specified cell.
      */
     @Override
-    public void recalculate(
-            String cellReference) {
+    public void recalculate(String cellReference) {
+        String changed = normalizeReference(cellReference);
 
-        String changed =
-                cellReference.toUpperCase();
-
-        /*
-         * Find all cells that depend directly
-         * or indirectly on the changed cell.
-         */
         Set<String> affected =
-                dependencyGraph
-                        .findAffectedCells(changed);
+                dependencyGraph.findAffectedCells(changed);
 
-        /*
-         * If the changed cell itself is a formula,
-         * it also needs to be recalculated.
-         */
         if (formulaCells.containsKey(changed)) {
-
             affected.add(changed);
         }
 
-        /*
-         * Nothing to recalculate.
-         */
         if (affected.isEmpty()) {
             return;
         }
 
-        /*
-         * Calculate the cells in dependency order.
-         *
-         * Example:
-         *
-         * B1 -> C1 -> D1
-         *
-         * becomes:
-         *
-         * B1, C1, D1
-         */
         var calculationOrder =
-                dependencyGraph.topologicalSort(
-                        affected
-                );
+                dependencyGraph.topologicalSort(affected);
 
-        /*
-         * Evaluate each formula in the
-         * correct order.
-         */
-        for (String ref :
-                calculationOrder) {
+        for (String ref : calculationOrder) {
+            FormulaCell formula = formulaCells.get(ref);
 
-            FormulaCell formula =
-                    formulaCells.get(ref);
-
-            /*
-             * Affected set should normally contain
-             * only formula cells, but this check makes
-             * the engine safer.
-             */
             if (formula == null) {
                 continue;
             }
 
-            System.out.println(
-                    "Recalculating " + ref
-            );
-
+            System.out.println("Recalculating " + ref);
             formula.evaluate(context);
         }
     }
 
-    /*
-     * Get the current value of a cell.
+    /**
+     * Returns the current value of a cell.
      */
-    public Object getValue(
-            String reference) {
+    public Object getValue(String reference) {
+        String ref = normalizeReference(reference);
 
-        String ref =
-                reference.toUpperCase();
-
-        /*
-         * Formula cell
-         */
-        FormulaCell formula =
-                formulaCells.get(ref);
+        FormulaCell formula = formulaCells.get(ref);
 
         if (formula != null) {
             return formula.getValue();
         }
 
-        /*
-         * Literal or empty cell
-         */
         return sheet.getValue(ref);
     }
 
-    /*
-     * Get the display value of a cell.
-     *
-     * For example:
-     *
-     * B1 = 15
-     *
-     * returns:
-     *
-     * "15"
-     *
-     * If there is an error:
-     *
-     * "#DIV/0!"
+    /**
+     * Returns the display value, including formula error messages.
      */
-    public String getDisplayValue(
-            String reference) {
+    public String getDisplayValue(String reference) {
+        String ref = normalizeReference(reference);
 
-        String ref =
-                reference.toUpperCase();
-
-        /*
-         * Formula cell
-         */
-        FormulaCell formula =
-                formulaCells.get(ref);
+        FormulaCell formula = formulaCells.get(ref);
 
         if (formula != null) {
             return formula.getDisplayValue();
         }
 
-        /*
-         * Literal or empty cell
-         */
         return sheet.getDisplayValue(ref);
     }
 
-    /*
-     * Get the dependency graph.
-     *
-     * Useful for testing and debugging.
+    /**
+     * Returns the error associated with a cell, if any.
+     */
+    public String getError(String reference) {
+        String ref = normalizeReference(reference);
+
+        FormulaCell formula = formulaCells.get(ref);
+
+        if (formula != null) {
+            return formula.getError();
+        }
+
+        return sheet.getError(ref);
+    }
+
+    /**
+     * Returns the dependency graph for testing and debugging.
      */
     public DependencyGraph getDependencyGraph() {
-
         return dependencyGraph;
+    }
+
+    private String normalizeReference(String reference) {
+        Objects.requireNonNull(
+                reference,
+                "Cell reference must not be null"
+        );
+
+        String ref = reference.trim().toUpperCase(Locale.ROOT);
+
+        if (!ref.matches("[A-Z]+[1-9][0-9]*")) {
+            throw new IllegalArgumentException(
+                    "Invalid cell reference: " + reference
+            );
+        }
+
+        return ref;
     }
 }
