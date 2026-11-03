@@ -1,9 +1,10 @@
 
 package worklet2.tests;
-
+
 import worklet2.engine.RecalculationEngineImpl;
 import worklet2.graph.GraphAlgorithms;
 import worklet2.graph.DependencyGraph;
+
 import api.Cell;
 import api.EvaluationContext;
 import api.Spreadsheet;
@@ -19,11 +20,13 @@ import worklet1.ExpressionEvaluator;
  * 1. Dependency edge operations and defensive copies.
  * 2. Topological ordering.
  * 3. Circular-dependency prevention and detection.
- * 4. Recalculation of dependent cells.
- * 5. Formula-to-literal replacement.
- * 6. Formula error handling and recovery.
- * 7. Preservation of existing formulas after rejected updates.
- * 8. Division-by-zero handling in the expression evaluator.
+ * 4. Cycle path reporting.
+ * 5. Atomic dependency replacement.
+ * 6. Recalculation of dependent cells.
+ * 7. Formula-to-literal replacement.
+ * 8. Formula error handling and recovery.
+ * 9. Preservation of existing formulas after rejected updates.
+ * 10. Division-by-zero handling in the expression evaluator.
  */
 public class Worklet2Test {
 
@@ -31,6 +34,7 @@ public class Worklet2Test {
     private static int failed = 0;
 
     public static void main(String[] args) {
+
         passed = 0;
         failed = 0;
 
@@ -41,38 +45,57 @@ public class Worklet2Test {
         // 1. Dependency graph operations
         test("Add dependency edges (A1 -> B1 -> C1)",
                 Worklet2Test::testAddDependency);
+
         test("Remove dependency edges (A1 -> B1)",
                 Worklet2Test::testRemoveDependency);
+
         test("Returned dependent set is a defensive copy",
                 Worklet2Test::testDefensiveCopy);
 
         // 2. Topological ordering
         test("Topological sort returns valid calculation order",
                 Worklet2Test::testTopologicalSortOrder);
+
         test("Subset topological sort on affected cells",
                 Worklet2Test::testSubsetTopologicalSort);
 
         // 3. Circular dependency detection
         test("Self-dependency rejection (A1 -> A1)",
                 Worklet2Test::testSelfDependency);
+
         test("Multi-cell circular dependency prevention",
                 Worklet2Test::testMultiCellCycleDetection);
+
         test("CircularDependencyException on cyclic topological sort",
                 Worklet2Test::testCircularDependencyExceptionThrown);
+
         test("Cycle prevention check (wouldCreateCycle)",
                 Worklet2Test::testWouldCreateCycle);
 
-        // 4. Recalculation and formula updates
+        // 4. Cycle path reporting and atomic replacement
+        test("Cycle path reporting for multi-cell cycle",
+                Worklet2Test::testCyclePathReporting);
+
+        test("Cycle path reporting for self-reference",
+                Worklet2Test::testSelfCyclePathReporting);
+
+        test("Rejected dependency replacement preserves graph",
+                Worklet2Test::testRejectedDependencyReplacement);
+
+        // 5. Recalculation and formula updates
         test("RecalculationEngine updates dependent cells",
                 Worklet2Test::testRecalculationEngineFlow);
+
         test("Replacing a formula with a literal updates dependents",
                 Worklet2Test::testFormulaToLiteralReplacement);
+
         test("Formula error handling and recovery",
                 Worklet2Test::testFormulaErrorRecovery);
+
         test("Rejected circular formula update preserves old formula",
                 Worklet2Test::testRejectedFormulaUpdatePreservesState);
 
-        // 5. Division-by-zero handling
+        // 6. Division-by-zero handling
         test("Division-by-zero throws ArithmeticException",
                 Worklet2Test::testDivisionByZero);
 
@@ -88,9 +111,12 @@ public class Worklet2Test {
         }
     }
 
-    // --- 1. Dependency graph operations ---
+    // --------------------------------------------------
+    // 1. Dependency graph operations
+    // --------------------------------------------------
 
     private static void testAddDependency() {
+
         DependencyGraph graph = new DependencyGraph();
 
         graph.addDependency("A1", "B1");
@@ -122,6 +148,7 @@ public class Worklet2Test {
     }
 
     private static void testRemoveDependency() {
+
         DependencyGraph graph = new DependencyGraph();
 
         graph.addDependency("A1", "B1");
@@ -141,10 +168,13 @@ public class Worklet2Test {
     }
 
     private static void testDefensiveCopy() {
+
         DependencyGraph graph = new DependencyGraph();
+
         graph.addDependency("A1", "B1");
 
         Set<String> dependents = graph.getDependents("A1");
+
         dependents.add("FAKE_CELL");
 
         assertSetEquals(
@@ -154,9 +184,12 @@ public class Worklet2Test {
         );
     }
 
-    // --- 2. Topological ordering ---
+    // --------------------------------------------------
+    // 2. Topological ordering
+    // --------------------------------------------------
 
     private static void testTopologicalSortOrder() {
+
         Map<String, Set<String>> graph = new HashMap<>();
 
         addEdge(graph, "A1", "B1");
@@ -183,6 +216,7 @@ public class Worklet2Test {
     }
 
     private static void testSubsetTopologicalSort() {
+
         DependencyGraph graph = new DependencyGraph();
 
         graph.addDependency("A1", "B1");
@@ -190,6 +224,7 @@ public class Worklet2Test {
         graph.addDependency("B1", "D1");
 
         Set<String> affected = graph.findAffectedCells("A1");
+
         List<String> order = graph.topologicalSort(affected);
 
         assertTrue(
@@ -203,10 +238,14 @@ public class Worklet2Test {
         );
     }
 
-    // --- 3. Circular dependency detection ---
+    // --------------------------------------------------
+    // 3. Circular dependency detection
+    // --------------------------------------------------
 
     private static void testSelfDependency() {
+
         DependencyGraph graph = new DependencyGraph();
+
         boolean threw = false;
 
         try {
@@ -227,6 +266,7 @@ public class Worklet2Test {
     }
 
     private static void testMultiCellCycleDetection() {
+
         DependencyGraph graph = new DependencyGraph();
 
         graph.addDependency("A1", "B1");
@@ -258,6 +298,7 @@ public class Worklet2Test {
     }
 
     private static void testCircularDependencyExceptionThrown() {
+
         Map<String, Set<String>> cyclicGraph = new HashMap<>();
 
         // Construct a cycle directly to test GraphAlgorithms.
@@ -269,6 +310,7 @@ public class Worklet2Test {
         try {
             GraphAlgorithms.topologicalSort(cyclicGraph);
         } catch (GraphAlgorithms.CircularDependencyException e) {
+
             threwCorrectException = true;
 
             assertTrue(
@@ -285,6 +327,7 @@ public class Worklet2Test {
     }
 
     private static void testWouldCreateCycle() {
+
         Map<String, Set<String>> graph = new HashMap<>();
 
         addEdge(graph, "A1", "B1");
@@ -301,14 +344,139 @@ public class Worklet2Test {
         );
     }
 
-    // --- 4. Recalculation engine tests ---
+    // --------------------------------------------------
+    // 4. Cycle path reporting and atomic replacement
+    // --------------------------------------------------
+
+    private static void testCyclePathReporting() {
+
+        DependencyGraph graph = new DependencyGraph();
+
+        graph.addDependency("B1", "C1");
+        graph.addDependency("C1", "D1");
+
+        boolean rejected = false;
+
+        try {
+            graph.addDependency("D1", "B1");
+        } catch (IllegalArgumentException e) {
+
+            rejected = true;
+
+            assertEquals(
+                    "Circular dependency detected: [D1, B1, C1, D1]",
+                    e.getMessage(),
+                    "The exact circular dependency path must be reported"
+            );
+        }
+
+        assertTrue(
+                rejected,
+                "Adding D1 -> B1 must be rejected"
+        );
+
+        assertTrue(
+                !graph.hasCycle(),
+                "The rejected edge must not create a cycle"
+        );
+    }
+
+    private static void testSelfCyclePathReporting() {
+
+        DependencyGraph graph = new DependencyGraph();
+
+        boolean rejected = false;
+
+        try {
+            graph.addDependency("A1", "A1");
+        } catch (IllegalArgumentException e) {
+
+            rejected = true;
+
+            assertEquals(
+                    "Circular dependency detected: A1 -> A1",
+                    e.getMessage(),
+                    "Self-reference must report A1 -> A1"
+            );
+        }
+
+        assertTrue(
+                rejected,
+                "Self-reference must be rejected"
+        );
+
+        assertTrue(
+                !graph.hasCycle(),
+                "Rejected self-reference must not modify the graph"
+        );
+    }
+
+    private static void testRejectedDependencyReplacement() {
+
+        DependencyGraph graph = new DependencyGraph();
+
+        graph.addDependency("A1", "B1");
+        graph.addDependency("B1", "C1");
+
+        boolean rejected = false;
+
+        try {
+            // Making A1 depend on C1 would create:
+            // A1 -> B1 -> C1 -> A1
+            graph.replaceDependencies("A1", setOf("C1"));
+
+        } catch (IllegalArgumentException e) {
+            rejected = true;
+        }
+
+        assertTrue(
+                rejected,
+                "Circular dependency replacement must be rejected"
+        );
+
+        assertSetEquals(
+                Collections.emptySet(),
+                graph.getDependencies("A1"),
+                "A1 must retain its original empty dependency set"
+        );
+
+        assertSetEquals(
+                setOf("B1"),
+                graph.getDependents("A1"),
+                "A1 must retain B1 as its dependent"
+        );
+
+        assertSetEquals(
+                setOf("C1"),
+                graph.getDependents("B1"),
+                "B1 must retain C1 as its dependent"
+        );
+
+        assertSetEquals(
+                Collections.emptySet(),
+                graph.getDependents("C1"),
+                "C1 must not gain A1 as a dependent"
+        );
+
+        assertTrue(
+                !graph.hasCycle(),
+                "The original graph must remain acyclic"
+        );
+    }
+
+    // --------------------------------------------------
+    // 5. Recalculation engine tests
+    // --------------------------------------------------
 
     private static Spreadsheet createTestSpreadsheet() {
+
         return new Spreadsheet() {
+
             private final Map<String, String> cells = new HashMap<>();
 
             @Override
             public void setCell(String reference, String content) {
+
                 cells.put(
                         reference.toUpperCase(Locale.ROOT),
                         content
@@ -317,6 +485,7 @@ public class Worklet2Test {
 
             @Override
             public Object getValue(String reference) {
+
                 String value = cells.get(
                         reference.toUpperCase(Locale.ROOT)
                 );
@@ -334,7 +503,9 @@ public class Worklet2Test {
 
             @Override
             public String getDisplayValue(String reference) {
+
                 Object value = getValue(reference);
+
                 return value == null ? "" : value.toString();
             }
 
@@ -351,7 +522,9 @@ public class Worklet2Test {
     }
 
     private static void testRecalculationEngineFlow() {
+
         Spreadsheet sheet = createTestSpreadsheet();
+
         RecalculationEngineImpl engine =
                 new RecalculationEngineImpl(sheet);
 
@@ -397,7 +570,9 @@ public class Worklet2Test {
      * while retaining B1 -> C1 and recalculating C1.
      */
     private static void testFormulaToLiteralReplacement() {
+
         Spreadsheet sheet = createTestSpreadsheet();
+
         RecalculationEngineImpl engine =
                 new RecalculationEngineImpl(sheet);
 
@@ -456,7 +631,9 @@ public class Worklet2Test {
      * invalid formula clears the error and restores normal calculation.
      */
     private static void testFormulaErrorRecovery() {
+
         Spreadsheet sheet = createTestSpreadsheet();
+
         RecalculationEngineImpl engine =
                 new RecalculationEngineImpl(sheet);
 
@@ -505,10 +682,14 @@ public class Worklet2Test {
         );
     }
 
-    // --- 5. Circular formula update regression test ---
+    // --------------------------------------------------
+    // 6. Circular formula update regression test
+    // --------------------------------------------------
 
     private static void testRejectedFormulaUpdatePreservesState() {
+
         Spreadsheet sheet = createTestSpreadsheet();
+
         RecalculationEngineImpl engine =
                 new RecalculationEngineImpl(sheet);
 
@@ -557,10 +738,14 @@ public class Worklet2Test {
         );
     }
 
-    // --- 6. Division by zero in ExpressionEvaluator ---
+    // --------------------------------------------------
+    // 7. Division by zero in ExpressionEvaluator
+    // --------------------------------------------------
 
     private static void testDivisionByZero() {
+
         EvaluationContext context = ref -> 0.0;
+
         boolean threwArithmetic = false;
 
         try {
@@ -575,15 +760,24 @@ public class Worklet2Test {
         );
     }
 
-    // --- Test harness utilities ---
+    // --------------------------------------------------
+    // Test harness utilities
+    // --------------------------------------------------
 
     private static void test(String name, Runnable testCase) {
+
         try {
+
             testCase.run();
+
             passed++;
+
             System.out.println("PASS | " + name);
+
         } catch (Throwable error) {
+
             failed++;
+
             System.out.println(
                     "FAIL | " + name + " | "
                             + error.getClass().getSimpleName()
@@ -597,14 +791,17 @@ public class Worklet2Test {
             String from,
             String to
     ) {
+
         graph.computeIfAbsent(from, key -> new HashSet<>()).add(to);
     }
 
     private static Set<String> setOf(String... items) {
+
         return new HashSet<>(Arrays.asList(items));
     }
 
     private static double toDouble(Object value) {
+
         if (value == null) {
             throw new AssertionError("Value to evaluate cannot be null");
         }
@@ -621,7 +818,9 @@ public class Worklet2Test {
             Set<String> actual,
             String message
     ) {
+
         if (!expected.equals(actual)) {
+
             throw new AssertionError(
                     message + " [expected=" + expected
                             + ", actual=" + actual + "]"
@@ -635,7 +834,9 @@ public class Worklet2Test {
             double delta,
             String message
     ) {
+
         if (Math.abs(expected - actual) > delta) {
+
             throw new AssertionError(
                     message + " [expected=" + expected
                             + ", actual=" + actual + "]"
@@ -648,7 +849,9 @@ public class Worklet2Test {
             Object actual,
             String message
     ) {
+
         if (!Objects.equals(expected, actual)) {
+
             throw new AssertionError(
                     message + " [expected=" + expected
                             + ", actual=" + actual + "]"
@@ -656,7 +859,11 @@ public class Worklet2Test {
         }
     }
 
-    private static void assertTrue(boolean condition, String message) {
+    private static void assertTrue(
+            boolean condition,
+            String message
+    ) {
+
         if (!condition) {
             throw new AssertionError(message);
         }

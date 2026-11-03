@@ -31,21 +31,30 @@ public class DependencyGraph {
         source = normalize(source);
         dependent = normalize(dependent);
 
+        // Direct self-reference.
         if (source.equals(dependent)) {
             throw new IllegalArgumentException(
-                    "A cell cannot depend on itself."
+                    "Circular dependency detected: "
+                            + source + " -> " + source
             );
         }
 
-        if (canReach(dependent, source, graph)) {
+        // Check whether dependent can already reach source.
+        List<String> path = findPath(dependent, source, graph);
+
+        if (path != null) {
+            List<String> cyclePath = new ArrayList<>();
+            cyclePath.add(source);
+            cyclePath.addAll(path);
+
             throw new IllegalArgumentException(
-                    "Adding dependency " + source + " -> " + dependent
-                            + " would create a circular reference."
+                    "Circular dependency detected: " + cyclePath
             );
         }
 
         addCell(source);
         addCell(dependent);
+
         graph.get(source).add(dependent);
     }
 
@@ -83,29 +92,41 @@ public class DependencyGraph {
             dependents.remove(dependent);
         }
 
-        // Validate and build the proposed dependencies on the copy.
+        // Normalize and sort proposed dependencies.
         Set<String> normalizedDependencies = new TreeSet<>();
 
         for (String dependency : newDependencies) {
             normalizedDependencies.add(normalize(dependency));
         }
 
+        // Validate and build the proposed dependencies on the copy.
         for (String source : normalizedDependencies) {
 
+            // Direct self-reference.
             if (source.equals(dependent)) {
                 throw new IllegalArgumentException(
-                        "A cell cannot depend on itself."
+                        "Circular dependency detected: "
+                                + source + " -> " + source
                 );
             }
 
             candidate.putIfAbsent(source, new HashSet<>());
             candidate.putIfAbsent(dependent, new HashSet<>());
 
-            if (canReach(dependent, source, candidate)) {
+            // Check whether adding source -> dependent creates a cycle.
+            List<String> path = findPath(
+                    dependent,
+                    source,
+                    candidate
+            );
+
+            if (path != null) {
+                List<String> cyclePath = new ArrayList<>();
+                cyclePath.add(source);
+                cyclePath.addAll(path);
+
                 throw new IllegalArgumentException(
-                        "Replacing dependencies for " + dependent
-                                + " would create a circular reference "
-                                + "through " + source + "."
+                        "Circular dependency detected: " + cyclePath
                 );
             }
 
@@ -117,6 +138,7 @@ public class DependencyGraph {
 
         for (Map.Entry<String, Set<String>> entry
                 : candidate.entrySet()) {
+
             graph.put(
                     entry.getKey(),
                     new HashSet<>(entry.getValue())
@@ -157,6 +179,7 @@ public class DependencyGraph {
 
         for (Map.Entry<String, Set<String>> entry
                 : graph.entrySet()) {
+
             if (entry.getValue().contains(cell)) {
                 dependencies.add(entry.getKey());
             }
@@ -229,6 +252,7 @@ public class DependencyGraph {
         }
 
         active.remove(cell);
+
         return false;
     }
 
@@ -246,6 +270,9 @@ public class DependencyGraph {
         return canReach(dependent, source, graph);
     }
 
+    /**
+     * Checks whether target is reachable from start.
+     */
     private boolean canReach(
             String start,
             String target,
@@ -264,10 +291,9 @@ public class DependencyGraph {
                 return true;
             }
 
-            for (String next :
-                    currentGraph.getOrDefault(
-                            current,
-                            Collections.emptySet())) {
+            for (String next : currentGraph.getOrDefault(
+                    current,
+                    Collections.emptySet())) {
 
                 if (visited.add(next)) {
                     queue.add(next);
@@ -276,6 +302,60 @@ public class DependencyGraph {
         }
 
         return false;
+    }
+
+    /**
+     * Finds an actual path from start to target using BFS.
+     *
+     * Returns the ordered path including start and target.
+     * Returns null if no path exists.
+     */
+    private List<String> findPath(
+            String start,
+            String target,
+            Map<String, Set<String>> currentGraph) {
+
+        Queue<String> queue = new ArrayDeque<>();
+        Map<String, String> parent = new HashMap<>();
+        Set<String> visited = new HashSet<>();
+
+        queue.add(start);
+        visited.add(start);
+
+        while (!queue.isEmpty()) {
+            String current = queue.poll();
+
+            if (current.equals(target)) {
+                List<String> path = new ArrayList<>();
+
+                String cell = target;
+
+                while (cell != null) {
+                    path.add(cell);
+                    cell = parent.get(cell);
+                }
+
+                Collections.reverse(path);
+
+                return path;
+            }
+
+            // Sort neighbours to make path selection deterministic.
+            Set<String> neighbours = currentGraph.get(current);
+
+            if (neighbours == null) {
+                continue;
+            }
+
+            for (String next : new TreeSet<>(neighbours)) {
+                if (visited.add(next)) {
+                    parent.put(next, current);
+                    queue.add(next);
+                }
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -343,11 +423,15 @@ public class DependencyGraph {
         return order;
     }
 
+    /**
+     * Creates a defensive copy of the dependency graph.
+     */
     private Map<String, Set<String>> copyGraph() {
         Map<String, Set<String>> copy = new HashMap<>();
 
         for (Map.Entry<String, Set<String>> entry
                 : graph.entrySet()) {
+
             copy.put(
                     entry.getKey(),
                     new HashSet<>(entry.getValue())
