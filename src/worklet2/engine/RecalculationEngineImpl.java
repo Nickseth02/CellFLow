@@ -1,7 +1,11 @@
 
 package worklet2.engine;
-
+
+import worklet2.engine.error.ErrorHandler;
+import worklet2.engine.error.CellError;
+import worklet2.engine.error.CellErrorType;
 import worklet2.graph.DependencyGraph;
+
 import api.EvaluationContext;
 import api.RecalculationEngine;
 import api.Spreadsheet;
@@ -15,18 +19,34 @@ import java.util.Collections;
 
 import worklet1.formula.FormulaCell;
 
+/**
+ * Worklet 2 recalculation engine.
+ *
+ * Handles formula evaluation, dependency-based recalculation,
+ * error detection, error propagation and error recovery.
+ */
 public class RecalculationEngineImpl implements RecalculationEngine {
 
     private final Spreadsheet sheet;
     private final DependencyGraph dependencyGraph;
+
     private final Map<String, FormulaCell> formulaCells = new HashMap<>();
+
+    private final ErrorHandler errorHandler = new ErrorHandler();
+
     private final EvaluationContext context;
 
     public RecalculationEngineImpl(Spreadsheet sheet) {
-        this.sheet = Objects.requireNonNull(sheet, "Spreadsheet must not be null");
+
+        this.sheet = Objects.requireNonNull(
+                sheet,
+                "Spreadsheet must not be null"
+        );
+
         this.dependencyGraph = new DependencyGraph();
 
         this.context = reference -> {
+
             String ref = normalizeReference(reference);
 
             FormulaCell formula = formulaCells.get(ref);
@@ -41,14 +61,15 @@ public class RecalculationEngineImpl implements RecalculationEngine {
 
     /**
      * Sets or updates a cell.
-     *
-     * Formula changes are validated against a temporary graph first.
-     * If the new dependencies would create a cycle, the old formula
-     * and its dependency relationships remain unchanged.
      */
     public void setCell(String reference, String content) {
+
         String ref = normalizeReference(reference);
-        Objects.requireNonNull(content, "Cell content must not be null");
+
+        Objects.requireNonNull(
+                content,
+                "Cell content must not be null"
+        );
 
         if (content.startsWith("=")) {
             setFormulaCell(ref, content);
@@ -59,44 +80,46 @@ public class RecalculationEngineImpl implements RecalculationEngine {
         recalculate(ref);
     }
 
+    /**
+     * Sets a formula after validating its dependencies.
+     */
     private void setFormulaCell(String ref, String content) {
-        // Build the candidate without changing the current formula.
+
         FormulaCell candidate = new FormulaCell(ref, content);
 
-        // Atomically validate and replace this cell's incoming edges.
-        // If validation fails, formulaCells and the original graph
-        // remain unchanged.
         dependencyGraph.replaceDependencies(
                 ref,
                 candidate.getDependencies()
         );
 
-        // Commit the formula only after the graph accepts it.
         formulaCells.put(ref, candidate);
     }
 
+    /**
+     * Replaces a formula with a literal value.
+     */
     private void setLiteralCell(String ref, String content) {
-        /*
-         * Let the spreadsheet validate/store the literal first.
-         * If this throws, the graph and formula map are unchanged.
-         */
+
         sheet.setCell(ref, content);
 
-        // A literal cell no longer has formula dependencies.
         dependencyGraph.replaceDependencies(
                 ref,
                 Collections.emptySet()
         );
 
         formulaCells.remove(ref);
+
+        errorHandler.clearError(ref);
+
         dependencyGraph.addCell(ref);
     }
 
     /**
-     * Recalculates all formula cells affected by the specified cell.
+     * Recalculates all formula cells affected by a changed cell.
      */
     @Override
     public void recalculate(String cellReference) {
+
         String changed = normalizeReference(cellReference);
 
         Set<String> affected =
@@ -114,6 +137,7 @@ public class RecalculationEngineImpl implements RecalculationEngine {
                 dependencyGraph.topologicalSort(affected);
 
         for (String ref : calculationOrder) {
+
             FormulaCell formula = formulaCells.get(ref);
 
             if (formula == null) {
@@ -121,7 +145,72 @@ public class RecalculationEngineImpl implements RecalculationEngine {
             }
 
             System.out.println("Recalculating " + ref);
+
+            /*
+             * Check whether any dependency has an existing error.
+             */
+            CellError dependencyError =
+                    errorHandler.findDependencyError(
+                            dependencyGraph.getDependencies(ref)
+                    );
+
+            /*
+             * Propagate the dependency error instead of evaluating
+             * a formula whose input is already invalid.
+             */
+            if (dependencyError != null) {
+
+                errorHandler.propagateError(
+                        ref,
+                        dependencyError
+                );
+
+                continue;
+            }
+
+            /*
+             * Clear the previous Worklet 2 error before recalculation.
+             */
+            errorHandler.clearError(ref);
+
+            /*
+             * Evaluate the formula.
+             */
             formula.evaluate(context);
+
+            /*
+             * Detect and record errors produced by FormulaCell.
+             */
+            String formulaError = formula.getError();
+
+            if (formulaError != null) {
+
+                CellErrorType errorType;
+
+                switch (formulaError) {
+
+                    case "#DIV/0!":
+                        errorType =
+                                CellErrorType.DIVISION_BY_ZERO;
+                        break;
+
+                    case "#PARSE!":
+                        errorType =
+                                CellErrorType.FORMULA_PARSE;
+                        break;
+
+                    default:
+                        errorType =
+                                CellErrorType.INVALID_VALUE;
+                        break;
+                }
+
+                errorHandler.recordError(
+                        ref,
+                        errorType,
+                        formulaError
+                );
+            }
         }
     }
 
@@ -129,6 +218,7 @@ public class RecalculationEngineImpl implements RecalculationEngine {
      * Returns the current value of a cell.
      */
     public Object getValue(String reference) {
+
         String ref = normalizeReference(reference);
 
         FormulaCell formula = formulaCells.get(ref);
@@ -141,10 +231,17 @@ public class RecalculationEngineImpl implements RecalculationEngine {
     }
 
     /**
-     * Returns the display value, including formula error messages.
+     * Returns the display value, including propagated errors.
      */
     public String getDisplayValue(String reference) {
+
         String ref = normalizeReference(reference);
+
+        String errorCode = errorHandler.getErrorCode(ref);
+
+        if (errorCode != null) {
+            return errorCode;
+        }
 
         FormulaCell formula = formulaCells.get(ref);
 
@@ -159,7 +256,14 @@ public class RecalculationEngineImpl implements RecalculationEngine {
      * Returns the error associated with a cell, if any.
      */
     public String getError(String reference) {
+
         String ref = normalizeReference(reference);
+
+        String errorCode = errorHandler.getErrorCode(ref);
+
+        if (errorCode != null) {
+            return errorCode;
+        }
 
         FormulaCell formula = formulaCells.get(ref);
 
@@ -171,13 +275,24 @@ public class RecalculationEngineImpl implements RecalculationEngine {
     }
 
     /**
+     * Returns the Worklet 2 error handler.
+     */
+    public ErrorHandler getErrorHandler() {
+        return errorHandler;
+    }
+
+    /**
      * Returns the dependency graph for testing and debugging.
      */
     public DependencyGraph getDependencyGraph() {
         return dependencyGraph;
     }
 
+    /**
+     * Normalizes and validates a cell reference.
+     */
     private String normalizeReference(String reference) {
+
         Objects.requireNonNull(
                 reference,
                 "Cell reference must not be null"
@@ -186,6 +301,7 @@ public class RecalculationEngineImpl implements RecalculationEngine {
         String ref = reference.trim().toUpperCase(Locale.ROOT);
 
         if (!ref.matches("[A-Z]+[1-9][0-9]*")) {
+
             throw new IllegalArgumentException(
                     "Invalid cell reference: " + reference
             );
